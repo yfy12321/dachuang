@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Django
+db.sqlite3
+media/
+
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# VSCode 配置
+.vscode/
+
+# 临时文件
+*.log
+*.tmp
+*.DS_Store
+
+# 前端构建产物
+dist/
+build/
+
+# 历史记录
+.history/

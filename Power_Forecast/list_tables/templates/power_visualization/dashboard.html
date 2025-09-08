@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ station_name }} - 功率预测仪表板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .station-info {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ 功率预测可视化仪表板</h1>
+            {% if station_name %}
+                <h2>{{ station_name }} - {{ station_type }}</h2>
+            {% endif %}
+        </div>
+
+        {% if error %}
+            <div class="error-message">
+                <h3>❌ 错误</h3>
+                <p>{{ error }}</p>
+            </div>
+        {% else %}
+            <div class="station-info">
+                <h3>📊 数据概览</h3>
+                <p>数据时间范围: {{ date_range }}</p>
+                <p>总记录数: {{ total_records }} 条</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h4>开始日期</h4>
+                    <p>{{ min_date }}</p>
+                </div>
+                <div class="stat-card">
+                    <h4>结束日期</h4>
+                    <p>{{ max_date }}</p>
+                </div>
+                <div class="stat-card">
+                    <h4>数据总量</h4>
+                    <p>{{ total_records }} 条</p>
+                </div>
+            </div>
+
+            <div class="charts-container">
+                <div class="chart-card">
+                    <h3>功率预测 vs 实际功率</h3>
+                    <canvas id="powerChart" width="400" height="300"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>预测误差分析</h3>
+                    <canvas id="errorChart" width="400" height="300"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <h3>每日统计</h3>
+                <canvas id="dailyChart" width="800" height="400"></canvas>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if not error %}
+    <script>
+        // 这里可以添加Chart.js的图表初始化代码
+        // 您需要从API获取数据来填充图表
+        
+        console.log('仪表板加载完成');
+        console.log('场站:', '{{ station_name }}');
+        console.log('类型:', '{{ station_type }}');
+        console.log('时间范围:', '{{ date_range }}');
+        
+        // 示例：初始化一个空的图表
+        const ctx = document.getElementById('powerChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '预测功率',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    tension: 0.1
+                }, {
+                    label: '实际功率',
+                    data: [],
+                    borderColor: 'rgb(54, 162, 235)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: '功率预测对比'
+                    }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>
