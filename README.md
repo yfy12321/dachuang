@@ -109,17 +109,7 @@ npm run dev
 GET /api/wind-power-data/?start_date=2024-01-01&end_date=2024-01-31
 ```
 
-### 开发注意事项
-- 模板路径：`settings.py` 中 `TEMPLATES['DIRS'] = [BASE_DIR / 'templates']`
-- 时区/语言：`LANGUAGE_CODE = 'zh-hans'`，`TIME_ZONE = 'Asia/Shanghai'`
-- CSV 路径：`MEDIA_ROOT` 下的 `*_results.csv`，不存在将返回 404
-- 根路由：`Power_Forecast/urls.py` 中包含 `path('', include('list_tables.urls'))`
 
-### 常见问题（FAQ）
-- 接口 403：`/api/logs/` 需要管理员用户（`is_staff`）。
-- 连接数据库失败：检查 PostgreSQL 连接信息与网络可达性；本地需启动服务且创建数据库 `dachuang`。
-- CSV 未找到：确认 `media/` 目录下是否存在对应 `*_results.csv` 文件，或在 `views.py` 中修改路径。
-- CORS/跨域：通过 Vite 代理或配置 Django 中间件（生产环境建议 Nginx 反向代理）。
 
 ### 许可证
 若无特别说明，默认此项目仅用于教学与研究目的。
