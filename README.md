@@ -62,7 +62,7 @@ pip install django psycopg2-binary pandas
 3) 迁移数据库并启动服务：
 ```
 python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 
 ```
 4) 验证接口：
 - 浏览器打开 `http://localhost:8000/`（根路由已包含 `list_tables.urls`）
