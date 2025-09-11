@@ -1,7 +1,0 @@
-{
-  "dependencies": {
-    "chart.js": "^4.5.0",
-    "element-plus": "^2.10.5",
-    "leaflet": "^1.9.4"
-  }
-}
