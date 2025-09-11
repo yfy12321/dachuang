@@ -11,7 +11,7 @@
 ```
 Power_Forecast/
 ├─ manage.py
-├─ Power_Forecast/                # Django 项目（settings/urls/wsgi 等）
+├─ backend/                # Django 项目（settings/urls/wsgi 等）
 │  ├─ settings.py                 # PostgreSQL 连接、模板路径、语言/时区
 │  ├─ urls.py                     # 根路由，包含 list_tables 应用
 │  └─ templates/                  # 顶层模板（dashboard/list_tables 等）
