@@ -1,15 +1,16 @@
 from django.shortcuts import render
 from django.db import connection
 from django.http import JsonResponse
-from .models import Station
+from .models import Station, Task_Data
 import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
-from .models import ForecastTask, MeasurePowerData, MeasureWeatherData1
+from .models import ForecastTask, MeasurePowerData
 from django.db.models import Q
 import json
 from datetime import datetime
+from django.shortcuts import render, HttpResponse
 '''
 def station_list(request):
     
@@ -185,11 +186,149 @@ def check_table_structure(request):
         return JsonResponse({'error': str(e)}, status=500)
     
 '''
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
+
+#选定场站以及任务类型
+@require_http_methods(["GET"])
+def select_filter_option(request):
+    try:
+        stations = list(Station.objects.values('id', 'station_name'))
+        task_types = [
+            {'id': '1', 'type_name': '超短期预测'},
+            {'id': '2', 'type_name': '日前预测'},
+            {'id': '3', 'type_name': '中长期预测'}
+        ]
+        
+        return JsonResponse({
+            'success': True,
+            'stations': stations,
+            'task_types': task_types
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'获取选项失败: {str(e)}'
+        }, status=500)
+
+#查询特定场站及任务对应的数据
+#测试代码： curl -X POST -H "Content-Type: application/json" -d '{"station_id":"2", "task_id":"1"}' http://127.0.0.1:8000/api/query_task_data/
+@require_http_methods(["POST"])
+@csrf_exempt
+def query_task_data(request):
+    try:
+        data = json.loads(request.body)
+        
+        station_id = data.get('station_id')
+        task_id = data.get('task_id')
+
+        if task_id == '1':  # 超短期预测
+            LineNum = 16
+        elif task_id == '2':  # 日前预测
+            LineNum = 96
+        elif task_id == '3':  # 中长期预测
+            LineNum = 672
+
+        if not station_id or not task_id:
+            return JsonResponse({
+                'success': False,
+                'message': '场站ID和任务ID为必填项'
+            }, status=400)
+        
+        queryset = Task_Data.objects.filter(station_id=station_id)
+        
+        initial_task_data = list(queryset.order_by('-timeStamp')[:LineNum].values())
+        
+        task_data = []
+
+        for record in initial_task_data:
+            filtered_record = {k: v for k, v in record.items() if v is not None and k != 'id'}
+            task_data.append(filtered_record)
+        
+        return JsonResponse({
+            'success': True,
+            'data': task_data,
+            'total_count': len(task_data)
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': '无效的JSON数据'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'查询失败: {str(e)}'
+        }, status=500)
+
+# 测试：curl -X POST -H "Content-Type: application/json" -d '{"station_id":"2", "task_id":"1"}' http://127.0.0.1:8000/api/export_to_csv/ -o test.csv
+#不写-o test.csv会直接在终端打印csv内容，写了会下载到当前目录
+
+import csv
+from io import StringIO
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def export_to_csv(request):
+    """导出CSV格式"""
+    # 创建StringIO对象，用于在内存中构建字符串内容
+    output = StringIO()
+    
+    # 创建CSV写入器，指定输出目标为StringIO对象
+    writer = csv.writer(output)
+
+    data = json.loads(request.body)
+        
+    station_id = data.get('station_id')
+    task_id = data.get('task_id')
+
+    if task_id == '1':  # 超短期预测
+        LineNum = 16
+    elif task_id == '2':  # 日前预测
+        LineNum = 96
+    elif task_id == '3':  # 中长期预测
+        LineNum = 672
+
+    if not station_id or not task_id:
+        return JsonResponse({
+            'success': False,
+            'message': '场站ID和任务ID为必填项'
+        }, status=400)
+        
+    queryset = Task_Data.objects.filter(station_id=station_id)
+        
+    initial_task_data = list(queryset.order_by('-timeStamp')[:LineNum].values())
+        
+    task_data = []
+
+    for record in initial_task_data:
+        filtered_record = {k: v for k, v in record.items() if v is not None and k != 'id'}
+        task_data.append(filtered_record)
+
+    if task_data:
+        headings = list(task_data[0].keys())
+
+    writer.writerow(headings)
+
+    for obj in task_data:
+        row = obj.values()
+        writer.writerow(row)
+
+    # 创建HTTP响应对象，指定内容类型为text/csv
+    response = HttpResponse(output.getvalue(), content_type='text/csv')
+    
+    # 设置响应头，告诉浏览器这是附件下载，并指定文件名
+    response['Content-Disposition'] = f'attachment; filename="{"Initial_Data_Export.csv"}"'
+    
+    # 返回HTTP响应
+    return response
 
 
 #以下代码使用Django的ORM框架的表达方式对直接用sql语句操作数据库的方式进行替换。
 #这些方法都是为了对postgres数据库增删查改的，解析csv文件的方法见同目录下"view_for_csv.py"
 # power_station 视图
+
 def station_list(request):
     
     """获取所有场站列表 或 创建新场站

@@ -55,7 +55,14 @@ urlpatterns = [
     path('api/daily-power-stats/', views.DailyPowerStatsAPIView.as_view(), name='daily-power-stats'),
     path('api/power-comparison/', views.PowerComparisonAPIView.as_view(), name='power-comparison'),
     path('power-dashboard/', views.power_dashboard, name='power-dashboard'),
+
+    ## 选定场站页面相关URL
+    path('api/select_filter_option/', views.select_filter_option, name='select_filter_option'),
+    path('api/query_task_data/', views.query_task_data, name='query_task_data'),
+    path('api/export_to_csv/', views.export_to_csv, name='export_to_csv'),
 ]
+
+
 
    
 

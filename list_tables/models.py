@@ -3,6 +3,60 @@ from django.core.validators import MinValueValidator
 from django.core.validators import MinValueValidator, MaxValueValidator  # 添加这行
 # Create your models here.
 
+
+class Task_Data(models.Model):
+    station_id = models.IntegerField()#id = 1 新乐光伏，id=2 巨鹿电场
+    timeStamp = models.DateTimeField()
+    power = models.FloatField(null=True, blank=True)
+    #以上为两电场共有参数，以下为巨鹿场站特有参数
+    windSpeed = models.FloatField(null=True, blank=True)
+    windDirection = models.FloatField(null=True, blank=True)
+    airPressure = models.FloatField(null=True, blank=True)
+    temperature = models.FloatField(null=True, blank=True)
+    humidity = models.FloatField(null=True, blank=True)
+    windDirection_sin = models.FloatField(null=True, blank=True)
+    windDirection_cos = models.FloatField(null=True, blank=True)
+    windSpeed_pre_1 = models.FloatField(null=True, blank=True)
+    windSpeed_pre_2 = models.FloatField(null=True, blank=True)
+    windSpeed_post_1 = models.FloatField(null=True, blank=True)
+    windSpeed_post_2 = models.FloatField(null=True, blank=True)
+    fValue = models.FloatField(null=True, blank=True)
+    windSpeed_center = models.FloatField(null=True, blank=True)
+    windSpeed_spread = models.FloatField(null=True, blank=True)
+    windSpeed_height = models.FloatField(null=True, blank=True)
+    windSpeed_max_change = models.FloatField(null=True, blank=True)
+    windSpeed_avg_change = models.FloatField(null=True, blank=True)
+    windSpeed_rising_strength = models.FloatField(null=True, blank=True)
+    windSpeed_falling_strength = models.FloatField(null=True, blank=True)
+    windSpeed_volatility = models.FloatField(null=True, blank=True)
+    month_sin = models.FloatField(null=True, blank=True)
+    month_cos = models.FloatField(null=True, blank=True)
+    two_days_ago_avg_power = models.FloatField(null=True, blank=True)
+    two_days_ago_max_power = models.FloatField(null=True, blank=True)
+    two_days_ago_min_power = models.FloatField(null=True, blank=True)
+    one_day_ago_morning_avg = models.FloatField(null=True, blank=True)
+    one_day_ago_morning_max = models.FloatField(null=True, blank=True)
+    one_day_ago_morning_min = models.FloatField(null=True, blank=True)
+    two_days_ago_power = models.FloatField(null=True, blank=True)
+    hour = models.FloatField(null=True, blank=True)
+    #以上为巨鹿场站特有参数，以下为新乐场站特有参数
+    wspd = models.FloatField(null=True, blank=True)
+    wdir = models.FloatField(null=True, blank=True)
+    swdown = models.FloatField(null=True, blank=True)
+    glw = models.FloatField(null=True, blank=True)
+    swddni = models.FloatField(null=True, blank=True)
+    swddir = models.FloatField(null=True, blank=True)
+    swddif = models.FloatField(null=True, blank=True)
+    td2m = models.FloatField(null=True, blank=True)
+    tsd = models.FloatField(null=True, blank=True)
+    dpt2m = models.FloatField(null=True, blank=True)
+    psfc = models.FloatField(null=True, blank=True)
+    rh2m = models.FloatField(null=True, blank=True)
+    qv2m = models.FloatField(null=True, blank=True)
+    clflo = models.FloatField(null=True, blank=True)
+    clfhi = models.FloatField(null=True, blank=True)
+
+
 class Station(models.Model):
     station_name = models.CharField(max_length=100, verbose_name='场站名称')
     unit_config = models.CharField(max_length=100, verbose_name='机组配置', null=True, blank=True)
@@ -16,7 +70,7 @@ class Station(models.Model):
     csv_path = models.CharField(max_length=200, verbose_name='csv文件路径', null=True, blank=True)
     class Meta:
         db_table = 'power_station'  # 指定实际的表名
-        managed = False  
+        managed = True  
 
     def __str__(self):
         return self.station_name
