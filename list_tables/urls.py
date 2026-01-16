@@ -45,7 +45,17 @@ urlpatterns = [
     
     # ===== 实用工具接口 =====
     path('api/wind-profile/<int:station_id>/', views.get_wind_profile, name='wind_profile'),
-    
+
+    # ===== 模型训练接口 =====
+    path('api/train/start/', views.train_start, name='train_start'),
+    path('api/train/status/', views.train_status, name='train_status'),
+    path('api/train/result/', views.train_result, name='train_result'),
+    path('api/train/tasks/', views.train_task_list, name='train_task_list'),
+    path('api/train/prediction-data/', views.train_prediction_data, name='train_prediction_data'),
+
+    # ======== 模型预测接口 ========
+    path('api/predict/choose/', views.predict_choose, name='model_choose'),
+    path('api/predict/use/', views.predict_use, name='predict_use'),    
 
     #以下urls都是解析csv文件方法的
    # 数据API端点

@@ -43,6 +43,20 @@
             <span class="nav-icon">📊</span>
             <span class="nav-text">预测结果</span>
           </li>
+          <li
+            :class="currentView === 'train' ? 'active-nav' : 'default-nav'"
+            @click="showTrain"
+          >
+            <span class="nav-icon">🤖</span>
+            <span class="nav-text">模型训练</span>
+          </li>
+          <li
+            :class="currentView === 'trainList' ? 'active-nav' : 'default-nav'"
+            @click="showTrainList"
+          >
+            <span class="nav-icon">📋</span>
+            <span class="nav-text">训练任务</span>
+          </li>
         </ul>
       </div>
 
@@ -176,7 +190,18 @@
 
       <!-- 右侧内容区域 -->
       <div class="content-area">
-        <div v-if="currentView === 'functions'" class="welcome-section">
+        <!-- 模型训练页面 -->
+        <div v-if="currentView === 'train'" class="train-page">
+          <TrainModel />
+        </div>
+
+        <!-- 训练任务列表页面 -->
+        <div v-else-if="currentView === 'trainList'" class="train-list-page">
+          <TrainTaskList />
+        </div>
+
+        <!-- 功能列表页面 -->
+        <div v-else-if="currentView === 'functions'" class="welcome-section">
           <div class="welcome-hero">
             <div class="hero-icon">⚡</div>
             <h2>欢迎使用电力预测系统</h2>
@@ -339,7 +364,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import A from './components/a.vue'
-import Map from './components/Map.vue' 
+import Map from './components/Map.vue'
+import TrainModel from './components/TrainModel.vue'
+import TrainTaskList from './components/TrainTaskList.vue' 
 const stations = ref([])
 const selectedStationId = ref(null)
 const detail = ref(null)
@@ -354,31 +381,6 @@ const navigateToCoreFunction = () => {  // 使用模板字符串正确拼接URL
   window.location.href = 'http://localhost:8000/core-function/';
 }
 
-const functions = ref([
-  {
-    id: 1,
-    icon: '🏭',
-    title: '场站管理',
-    description: '查看和管理所有电力场站信息，实时监控运行状态',
-    badge: '核心功能',
-    onClick: navigateToCoreFunction
-  },
-  {
-    id: 2,
-    icon: '🤖',
-    title: '预测规则',
-    description: '配置超短期、日前和中长期预测算法规则',
-    badge: 'AI智能'
-  },
-  {
-    id: 3,
-    icon: '⚡',
-    title: '容量管理',
-    description: '管理场站机组配置和装机容量信息',
-    badge: '容量优化'
-  }
-])
-
 const showFunctions = () => {
   currentView.value = 'functions'
   selectedStationId.value = null
@@ -391,16 +393,64 @@ const showStations = () => {
   detail.value = null
 }
 
+const showTrain = () => {
+  currentView.value = 'train'
+  selectedStationId.value = null
+  detail.value = null
+}
+
+const showTrainList = () => {
+  currentView.value = 'trainList'
+  selectedStationId.value = null
+  detail.value = null
+}
+
+const functions = ref([
+  {
+    id: 1,
+    icon: '🏭',
+    title: '场站管理',
+    description: '查看和管理所有电力场站信息，实时监控运行状态',
+    badge: '核心功能',
+    onClick: navigateToCoreFunction
+  },
+  {
+    id: 2,
+    icon: '🤖',
+    title: '模型训练',
+    description: '配置训练参数，启动模型训练任务',
+    badge: 'AI智能',
+    onClick: showTrain
+  },
+  {
+    id: 3,
+    icon: '📋',
+    title: '训练任务',
+    description: '查看和管理所有训练任务，监控训练状态',
+    badge: '任务管理',
+    onClick: showTrainList
+  },
+  {
+    id: 4,
+    icon: '⚡',
+    title: '容量管理',
+    description: '管理场站机组配置和装机容量信息',
+    badge: '容量优化'
+  }
+])
+
 const fetchStations = async () => {
   try {
     const res = await fetch('/tables/api/stations/')
     if (res.ok) {
       stations.value = await res.json()
     } else {
-      console.error('获取场站列表失败:', res.status)
+      const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+      console.error('获取场站列表失败:', res.status, errorData)
     }
   } catch (error) {
     console.error('获取场站列表出错:', error)
+    // 静默处理错误，避免未捕获的Promise
   }
 }
 
@@ -410,10 +460,12 @@ const fetchDetail = async (id) => {
     if (res.ok) {
       detail.value = await res.json()
     } else {
-      console.error('获取场站详情失败:', res.status)
+      const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+      console.error('获取场站详情失败:', res.status, errorData)
     }
   } catch (error) {
     console.error('获取场站详情出错:', error)
+    // 静默处理错误，避免未捕获的Promise
   }
 }
 

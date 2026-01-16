@@ -6,11 +6,20 @@ import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
-from .models import ForecastTask, MeasurePowerData
+from .models import ForecastTask, MeasurePowerData , ForecastTaskInformation
 from django.db.models import Q
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
 from django.shortcuts import render, HttpResponse
+from .train_utils import train_model
+from .db_utils import ensure_sequence_exists
+from django.views.decorators.http import require_GET, require_POST
+import threading
+import time
+import re
+import joblib
+import math
 '''
 def station_list(request):
     
@@ -119,14 +128,18 @@ def list_tables(request):
         tables = [row[0] for row in cursor.fetchall()]
     return render(request, 'list_tables.html', {'tables': tables})
 
-def station_list(request):
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT id, station_name 
-            FROM power_station
-        """)
-        stations = [{'id': row[0], 'name': row[1]} for row in cursor.fetchall()]
-    return JsonResponse(stations, safe=False)
+def station_list_old(request):
+    """旧的station_list函数，保留作为备份"""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, station_name 
+                FROM power_station
+            """)
+            stations = [{'id': row[0], 'name': row[1]} for row in cursor.fetchall()]
+        return JsonResponse(stations, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 def station_detail(request, pk):
     try:
@@ -330,44 +343,50 @@ def export_to_csv(request):
 # power_station 视图
 
 def station_list(request):
-    
     """获取所有场站列表 或 创建新场站
     GET /api/stations/ - 获取列表
     POST /api/stations/ - 创建新场站
     """
-    if request.method == 'GET':
-        stations = Station.objects.all()
-        data = [{
-            "id": s.id,
-            "station_name": s.station_name,
-            "unit_config": s.unit_config,
-            "installed_capacity": s.installed_capacity,
-            "latitude": s.latitude,
-            "longitude": s.longitude,
-            "area_km2": s.area_km2,
-            "ultra_short_term_rule": s.ultra_short_term_rule,
-            "day_ahead_rule": s.day_ahead_rule,
-            "mid_long_term_rule": s.mid_long_term_rule
-        } for s in stations]
-        return JsonResponse(data, safe=False)  # safe=False允许返回列表
+    try:
+        if request.method == 'GET':
+            stations = Station.objects.all()
+            data = [{
+                "id": s.id,
+                "station_name": s.station_name,
+                "unit_config": s.unit_config,
+                "installed_capacity": s.installed_capacity,
+                "latitude": s.latitude,
+                "longitude": s.longitude,
+                "area_km2": s.area_km2,
+                "ultra_short_term_rule": s.ultra_short_term_rule,
+                "day_ahead_rule": s.day_ahead_rule,
+                "mid_long_term_rule": s.mid_long_term_rule
+            } for s in stations]
+            return JsonResponse(data, safe=False)  # safe=False允许返回列表
 
-    elif request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            station = Station.objects.create(
-                station_name=data.get('station_name'),
-                unit_config=data.get('unit_config'),
-                installed_capacity=data.get('installed_capacity'),
-                latitude=data.get('latitude'),
-                longitude=data.get('longitude'),
-                area_km2=data.get('area_km2'),
-                ultra_short_term_rule=data.get('ultra_short_term_rule'),
-                day_ahead_rule=data.get('day_ahead_rule'),
-                mid_long_term_rule=data.get('mid_long_term_rule')
-            )
-            return JsonResponse({"id": station.id, "message": "创建成功"}, status=201)
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
+        elif request.method == 'POST':
+            try:
+                data = json.loads(request.body)
+                station = Station.objects.create(
+                    station_name=data.get('station_name'),
+                    unit_config=data.get('unit_config'),
+                    installed_capacity=data.get('installed_capacity'),
+                    latitude=data.get('latitude'),
+                    longitude=data.get('longitude'),
+                    area_km2=data.get('area_km2'),
+                    ultra_short_term_rule=data.get('ultra_short_term_rule'),
+                    day_ahead_rule=data.get('day_ahead_rule'),
+                    mid_long_term_rule=data.get('mid_long_term_rule')
+                )
+                return JsonResponse({"id": station.id, "message": "创建成功"}, status=201)
+            except Exception as e:
+                return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            "error": f"获取场站列表失败: {str(e)}",
+            "traceback": traceback.format_exc()
+        }, status=500)
           
 
 def list_tables(request):
@@ -976,3 +995,654 @@ def power_dashboard(request):
     
     # 修改模板路径为相对路径
     return render(request, 'dashboard.html', context)
+
+# ======== 模型训练接口 ========
+
+
+@csrf_exempt
+@require_POST
+def train_start(request):
+    """
+    启动模型训练
+    在用户完成所有选择后，启动一次模型训练与预测任务。
+    
+    请求参数(JSON):
+    {
+      "station_id": "2",
+      "task_id": "1", 
+      "model_type": "lstm",
+      "test_start_time": "2023-01-01 00:00"
+    }
+    
+    返回示例:
+    {
+      "success": true,
+      "message": "模型训练已启动",
+      "task_id": 12
+    }
+    """
+    try:
+        # 解析JSON数据
+        data = json.loads(request.body)
+        
+        # 获取参数
+        station_id = data.get('station_id')
+        station_id = int(station_id)
+        task_id = data.get('task_id')
+        task_id = int(task_id)
+        model_type = data.get('model_type')
+        test_start_time = data.get('test_start_time')
+        
+        # 参数校验
+        if not all([station_id, task_id, model_type, test_start_time]):
+            return JsonResponse({
+                "success": False,
+                "message": "缺少必要参数: station_id, task_id, model_type, test_start_time"
+            }, status=400)
+        
+        # 将test_start_time转换为datetime对象
+        try:
+            test_start_dt = datetime.strptime(test_start_time, '%Y-%m-%d %H:%M')
+        except ValueError:
+            return JsonResponse({
+                "success": False,
+                "message": "时间格式错误，应为 YYYY-MM-DD HH:MM"
+            }, status=400)
+        
+        # 根据model_type确定forecast_type
+        if task_id == 1:  # 超短期预测
+            forecast_type = 'ultra_short'
+        elif task_id == 2:  # 短期预测
+            forecast_type = 'short'
+        elif task_id == 3:  # 中期预测
+            forecast_type = 'medium'
+        else:
+            return JsonResponse({
+                "success": False,
+                "message": "无效的task_id"
+            }, status=400)
+
+        # 创建预测任务记录
+        # 获取对应的Station对象
+        try:
+            station = Station.objects.get(id=station_id)
+        except Station.DoesNotExist:
+            return JsonResponse({
+                "success": False,
+                "message": f"场站ID {station_id} 不存在"
+            }, status=400)
+        
+        # 确保数据库序列存在（修复可能的序列问题）
+        try:
+            ensure_sequence_exists('forecast_tasks_information', 'task_id')
+        except Exception as seq_error:
+            # 如果修复序列失败，记录错误但继续尝试创建
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"序列修复失败，但继续尝试创建任务: {str(seq_error)}")
+        
+        # 获取当前时间作为datetime对象（使用Django时区）
+        now = timezone.now()
+        
+        try:
+            forecast_task = ForecastTaskInformation.objects.create(
+                station=station,
+                forecast_type=forecast_type,
+                model_type=model_type,
+                start_time=now,
+                end_time=now,  # 预测任务默认结束时间为开始时间,模型训练完成后要修改
+                test_start_time=test_start_dt,
+                status='running'
+            )
+            
+            # 确保task_id已生成
+            if not forecast_task.task_id:
+                # 如果task_id未自动生成，尝试刷新
+                forecast_task.refresh_from_db()
+            
+            # 异步执行训练
+            thread = threading.Thread(
+                target=train_model,
+                args=(station_id, model_type, test_start_time, forecast_task.task_id)
+            )
+            thread.daemon = True  # 设置为守护线程
+            thread.start()
+
+            # 返回成功响应
+            return JsonResponse({
+                    "success": True,
+                    "message": "模型训练已启动",
+                    "task_id": forecast_task.task_id
+                })
+        except Exception as create_error:
+            # 捕获创建时的错误，提供更详细的错误信息
+            import traceback
+            error_detail = traceback.format_exc()
+            return JsonResponse({
+                "success": False,
+                "message": f"创建训练任务失败: {str(create_error)}",
+                "detail": error_detail
+            }, status=500)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "success": False,
+            "message": "请求体不是有效的JSON格式"
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "message": f"启动训练失败: {str(e)}"
+        }, status=500)
+
+@require_GET
+def train_status(request):
+    """
+    查询模型训练状态（前端轮询）
+    
+    请求参数(Query):
+    task_id: 模型训练任务ID
+    
+    返回示例（未完成）:
+    {
+      "success": true,
+      "status": "running"
+    }
+    
+    返回示例（已完成）:
+    {
+      "success": true,
+      "status": "finished",
+      "result_id": 12
+    }
+    """
+    try:
+        # 获取查询参数
+        task_id = request.GET.get('task_id')
+        task_id = int(task_id)
+        
+        # 参数校验
+        if not task_id:
+            return JsonResponse({
+                "success": False,
+                "message": "缺少必要参数"
+            }, status=400)
+        
+        # 查找匹配的预测任务
+        try:
+            # 根据station_id查找最新的预测任务
+            forecast_task = ForecastTaskInformation.objects.filter(task_id=task_id).first()
+
+            
+            if not forecast_task:
+                # 如果没有找到任务，返回错误信息
+                return JsonResponse({
+                    "success": False,
+                    "message": "未找到对应的训练任务"
+                }, status=404)
+            
+            # 根据任务状态返回结果
+            if forecast_task.status == 'completed':
+                # 任务已完成，返回finished状态和结果ID
+                return JsonResponse({
+                    "success": True,
+                    "status": "finished",
+                    "result_id": forecast_task.task_id
+                })
+            elif forecast_task.status == 'failed':
+                # 任务失败
+                return JsonResponse({
+                    "success": True,
+                    "status": "failed",
+                    "error_message": forecast_task.error_message
+                })
+            else:
+                # 任务仍在运行中
+                return JsonResponse({
+                    "success": True,
+                    "status": "running"
+                })
+                
+        except ForecastTaskInformation.DoesNotExist:
+            # 没有找到对应的任务
+            return JsonResponse({
+                "success": False,
+                "message": "未找到对应的训练任务"
+            }, status=404)
+            
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "message": f"查询失败: {str(e)}"
+        }, status=500)
+
+@require_GET
+def train_task_list(request):
+    """
+    获取训练任务列表
+    GET /api/train/tasks/
+    
+    查询参数:
+    - station_id: 可选，按场站筛选
+    - status: 可选，按状态筛选 (running/completed/failed)
+    """
+    try:
+        queryset = ForecastTaskInformation.objects.all()
+        
+        # 筛选条件
+        station_id = request.GET.get('station_id')
+        if station_id:
+            queryset = queryset.filter(station_id=int(station_id))
+        
+        status = request.GET.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        
+        # 转换为字典列表
+        import math
+        tasks = []
+        for task in queryset.order_by('-start_time'):
+            # 处理Infinity和NaN值
+            def safe_float(value):
+                if value is None:
+                    return None
+                try:
+                    fval = float(value)
+                    if math.isinf(fval) or math.isnan(fval):
+                        return None
+                    return fval
+                except (ValueError, TypeError):
+                    return None
+            
+            # 时区转换：将UTC时间转换为本地时间（Asia/Shanghai）
+            def format_datetime(dt):
+                if dt is None:
+                    return None
+                # 如果datetime是时区感知的，转换为Asia/Shanghai时区
+                if timezone.is_aware(dt):
+                    # 使用Django的时区设置
+                    from django.conf import settings
+                    local_dt = timezone.localtime(dt, timezone.get_current_timezone())
+                else:
+                    local_dt = dt
+                return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            tasks.append({
+                'task_id': task.task_id,
+                'station_id': task.station.id,
+                'station_name': task.station.station_name,
+                'forecast_type': task.forecast_type,
+                'model_type': task.model_type,
+                'test_start_time': format_datetime(task.test_start_time),
+                'start_time': format_datetime(task.start_time),
+                'end_time': format_datetime(task.end_time),
+                'status': task.status,
+                'mae': safe_float(task.mae),
+                'rmse': safe_float(task.rmse),
+                'mape': safe_float(task.mape),
+                'error_message': task.error_message
+            })
+        
+        return JsonResponse(tasks, safe=False)
+    except Exception as e:
+        return JsonResponse({
+            'error': f'获取任务列表失败: {str(e)}'
+        }, status=500)
+
+@require_GET
+def train_result(request):
+    """
+    查询指定预测结果的模型训练指标。
+    通过 GET 请求的 query parameter 传入 result_id。
+    例如: /api/train/result/?result_id=123
+    """
+
+    result_id = request.GET.get('result_id') 
+    
+    if not result_id:
+        return JsonResponse({
+            "success": False,
+            "error": "缺少必需的参数 'result_id'"
+        }, status=400)
+    
+    try:
+        result_id = int(result_id)
+        forecast_task=ForecastTaskInformation.objects.get(task_id=result_id)
+
+        metrics_data = {
+            "MAE": forecast_task.mae,
+            "RMSE": forecast_task.rmse,
+            "MAPE": forecast_task.mape
+        }
+
+        return JsonResponse({
+            "success": True,
+            "metrics": metrics_data
+        })
+    except ValueError:
+        return JsonResponse({
+            "success": False,
+            "error": f"无效的结果ID: '{result_id}'"
+        }, status=400)
+        
+    except ForecastTaskInformation.DoesNotExist:
+        return JsonResponse({
+            "success": False,
+            "error": f"未找到ID为 {result_id} 的任务"
+        }, status=404)
+        
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "error": "服务器内部错误"
+        }, status=500)
+
+@require_GET
+def train_prediction_data(request):
+    """
+    获取训练任务的预测数据用于可视化
+    GET /api/train/prediction-data/?task_id=123
+    """
+    task_id = request.GET.get('task_id')
+    
+    if not task_id:
+        return JsonResponse({
+            "success": False,
+            "error": "缺少必需的参数 'task_id'"
+        }, status=400)
+    
+    try:
+        task_id = int(task_id)
+        forecast_task = ForecastTaskInformation.objects.get(task_id=task_id)
+        
+        if forecast_task.status != 'completed':
+            return JsonResponse({
+                "success": False,
+                "error": "训练任务尚未完成"
+            }, status=400)
+        
+        # 重新加载模型并获取预测数据
+        station_id = forecast_task.station.id
+        model_type = forecast_task.model_type
+        test_start_time = forecast_task.test_start_time
+        
+        # 从数据库获取数据
+        qs = Task_Data.objects.filter(station_id=station_id).order_by('timeStamp')
+        df = pd.DataFrame(list(qs.values()))
+        
+        # 选择特征
+        if station_id == 1:
+            feature_columns = ['wspd', 'wdir', 'swdown', 'glw', 'td2m', 'psfc', 'rh2m']
+        elif station_id == 2:
+            feature_columns = ['windSpeed', 'windDirection', 'temperature', 'humidity', 'airPressure']
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": "不支持的场站ID"
+            }, status=400)
+        
+        x = df[feature_columns]
+        y = df["power"]
+        
+        # 划分训练集和测试集
+        train_mask = df['timeStamp'] < test_start_time
+        test_mask = df['timeStamp'] >= test_start_time
+        
+        x_test = x[test_mask]
+        y_test = y[test_mask]
+        timestamps = df[test_mask]['timeStamp'].tolist()
+        
+        # 加载模型
+        safe_test_start_time = test_start_time.strftime('%Y-%m-%d %H:%M').replace(" ", "_").replace(":", "-")
+        model_dir = os.path.join(settings.BASE_DIR, 'saved_models')
+        model_filename = f"model_station_{station_id}_{model_type}_{safe_test_start_time}_{task_id}.pkl"
+        model_path = os.path.join(model_dir, model_filename)
+        
+        if not os.path.exists(model_path):
+            return JsonResponse({
+                "success": False,
+                "error": "模型文件不存在"
+            }, status=404)
+        
+        model = joblib.load(model_path)
+        y_pred = model.predict(x_test)
+        
+        # 格式化时间戳（转换为本地时区）
+        formatted_timestamps = []
+        for ts in timestamps:
+            if hasattr(ts, 'strftime'):
+                # 转换为本地时区
+                if timezone.is_aware(ts):
+                    local_ts = timezone.localtime(ts, timezone.get_current_timezone())
+                else:
+                    local_ts = ts
+                formatted_timestamps.append(local_ts.strftime('%Y-%m-%d %H:%M:%S'))
+            else:
+                formatted_timestamps.append(str(ts))
+        
+        return JsonResponse({
+            "success": True,
+            "data": {
+                "timestamps": formatted_timestamps,
+                "actual": [float(v) for v in y_test.tolist()],
+                "predicted": [float(v) for v in y_pred.tolist()],
+                "metrics": {
+                    "mae": float(forecast_task.mae) if forecast_task.mae else None,
+                    "rmse": float(forecast_task.rmse) if forecast_task.rmse else None,
+                    "mape": float(forecast_task.mape) if forecast_task.mape else None
+                }
+            }
+        })
+        
+    except ForecastTaskInformation.DoesNotExist:
+        return JsonResponse({
+            "success": False,
+            "error": f"未找到ID为 {task_id} 的任务"
+        }, status=404)
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            "success": False,
+            "error": f"获取预测数据失败: {str(e)}",
+            "traceback": traceback.format_exc()
+        }, status=500)
+
+
+@csrf_exempt
+@require_POST
+def predict_choose(request):
+    """
+    预测模型
+    
+    请求参数(JSON):
+    {
+        "station_id": 123,  # 场站ID
+        "model_type": "linear",  # 模型类型
+        "test_start_time": "2023-01-01 00:00"  # 测试集开始时间
+        "forecast_task_id": 123  # 预测任务ID
+    }
+    """
+    try: 
+        data = json.loads(request.body)
+        station_id = data.get('station_id')
+        model_type = data.get('model_type')
+        forecast_task_id = data.get('forecast_task_id')
+        test_start_time = data.get('test_start_time')
+        safe_test_start_time = test_start_time.replace(" ", "_").replace(":", "-")
+
+
+         # 构建模型路径
+        model_dir = os.path.join(settings.BASE_DIR, 'saved_models')
+        model_filename = f"model_station_{station_id}_{model_type}_{safe_test_start_time}_{forecast_task_id}.pkl"
+        model_path = os.path.join(model_dir, model_filename)
+
+        # 检查模型文件是否存在
+        if not os.path.exists(model_path):
+            return JsonResponse({
+                "message": "模型文件不存在"
+            }, status=404)
+        
+        model = joblib.load(model_path)
+
+        # 提示使用的特征
+        if station_id == 1:
+            features = ['wspd', 'wdir', 'swdown', 'glw', 'td2m', 'psfc', 'rh2m']
+        elif station_id == 2:
+            features = ['windSpeed', 'windDirection', 'temperature', 'humidity', 'airPressure']
+        else:
+            return JsonResponse({
+                "message": "未知的场站ID"
+            }, status=400)
+        
+        return JsonResponse({
+            "message": "模型加载成功",
+            "model_path": model_path,
+            "features": features
+        })
+    except Exception as e:
+        return JsonResponse({
+            "message": f"预测失败: {str(e)}"
+        }, status=500)
+    
+
+@csrf_exempt
+def predict_use(request):
+    """
+    使用指定模型进行预测
+    GET: 传入模型路径
+    POST: 传入数据文件路径进行预测
+    """
+    if request.method == 'GET':
+        # 通过GET参数获取模型路径
+        model_path = request.GET.get('model_path')
+        
+        if not model_path:
+            return JsonResponse({
+                'success': False,
+                'error': '缺少model_path参数'
+            }, status=400)
+        
+        # 检查模型文件是否存在
+        if not os.path.exists(model_path):
+            return JsonResponse({
+                'success': False,
+                'error': '指定的模型文件不存在'
+            }, status=404)
+        
+        # 可以返回模型的一些基本信息
+        return JsonResponse({
+            'success': True,
+            'message': '模型已准备好,请传入数据文件路径进行预测',
+            'model_path': model_path
+        })
+    
+    elif request.method == 'POST':
+        try:
+            # 解析JSON数据
+            data = json.loads(request.body)
+            model_path = request.GET.get('model_path')  # 仍然从GET参数获取模型路径
+            data_file = data.get('data_file')
+            
+            # 参数校验
+            if not model_path:
+                return JsonResponse({
+                    'success': False,
+                    'error': '缺少model_path参数(请通过GET参数传递)'
+                }, status=400)
+            
+            if not data_file:
+                return JsonResponse({
+                    'success': False,
+                    'error': '缺少data_file参数'
+                }, status=400)
+            
+            # 检查模型文件是否存在
+            if not os.path.exists(model_path):
+                return JsonResponse({
+                    'success': False,
+                    'error': '指定的模型文件不存在'
+                }, status=404)
+            
+            # 检查数据文件是否存在
+            if not os.path.exists(data_file):
+                return JsonResponse({
+                    'success': False,
+                    'error': '指定的数据文件不存在'
+                }, status=404)
+            
+            # 加载模型
+            model = joblib.load(model_path)
+            
+            # 读取数据文件
+            df = pd.read_csv(data_file)
+            
+            # 根据场站ID选择合适的特征列
+            # 这里假设可以根据文件名或路径推断场站ID
+            # 或者您可以在GET/POST参数中传递场站ID
+            station_id = None
+            if 'station_1' in model_path or '新乐' in model_path:
+                station_id = 1
+            elif 'station_2' in model_path or '巨鹿' in model_path:
+                station_id = 2
+            
+            # 选择特征
+            if station_id == 1:
+                # 新乐光伏特征列
+                feature_columns = ['wspd', 'wdir', 'swdown', 'glw', 'td2m', 'psfc', 'rh2m']
+            elif station_id == 2:
+                # 巨鹿电场特征列
+                feature_columns = ['windSpeed', 'windDirection', 'temperature', 'humidity', 'airPressure']
+
+            # 从模型路径中提取任务ID
+            task_id_match = re.search(r'_(\d+)\.pkl$', model_path)
+            forecast_task_id = None
+            if task_id_match:
+                forecast_task_id = int(task_id_match.group(1))
+
+            
+            # 确保特征列存在于数据中
+            missing_columns = [col for col in feature_columns if col not in df.columns]
+            if missing_columns:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'数据文件缺少以下特征列: {missing_columns}'
+                }, status=400)
+            
+            # 提取特征数据
+            x = df[feature_columns]
+            
+            # 进行预测
+            predictions = model.predict(x)
+            
+            # 将预测结果添加到DataFrame
+            df['predicted_power'] = predictions
+            
+            # 生成结果文件路径
+            result_file = data_file.replace('.csv', f'_task_{forecast_task_id}_predictions.csv')
+            df.to_csv(result_file, index=False)
+            
+            # 返回结果
+            return JsonResponse({
+                'success': True,
+                'message': '预测完成',
+                'result_file': result_file,
+                'predictions': predictions.tolist(),
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': '请求体不是有效的JSON格式'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': f'预测过程中发生错误: {str(e)}'
+            }, status=500)
+    
+    else:
+        return JsonResponse({
+            'success': False,
+            'error': '只支持GET和POST方法'
+        }, status=405)
+

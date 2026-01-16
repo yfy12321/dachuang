@@ -671,3 +671,67 @@ class ApiLog(models.Model):
 
     def __str__(self):
         return f"{self.request_method} {self.endpoint} - {self.response_status}"
+
+class ForecastTaskInformation(models.Model):
+    FORECAST_TYPES = [
+        ('ultra_short', '超短期'),
+        ('short', '短期'), 
+        ('medium', '中期')
+    ]
+    STATUS_CHOICES = [
+        ('running', '运行中'),
+        ('completed', '已完成'),
+        ('failed', '失败')
+    ]
+    MODEL_TYPE_CHOICES = [
+        ('linear', '线性回归'),
+        ('random_forest', '随机森林'),
+        ('lstm', 'LSTM'),
+        ('gru', 'GRU'),
+        ('xgboost', 'XGBoost'),
+        ('ensemble', '集成学习')
+    ]
+
+    task_id = models.AutoField(primary_key=True, verbose_name='任务ID')
+    station = models.ForeignKey(
+        'Station',
+        on_delete=models.CASCADE,
+        db_column='station_id',
+        verbose_name='关联场站'
+    )
+    forecast_type = models.CharField(
+        max_length=20,
+        choices=FORECAST_TYPES,
+        verbose_name='预测类型'
+    )
+    model_type = models.CharField(
+        max_length=50,
+        choices=MODEL_TYPE_CHOICES,
+        verbose_name='模型类型'
+    )
+    test_start_time = models.DateTimeField(verbose_name='测试集起点时间')
+    
+    start_time = models.DateTimeField(verbose_name='开始时间')
+    end_time = models.DateTimeField(verbose_name='结束时间')
+
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        verbose_name='任务状态'
+    )
+
+    mae = models.FloatField(null=True, blank=True, verbose_name='平均绝对误差(MAE)')
+    rmse = models.FloatField(null=True, blank=True, verbose_name='均方根误差(RMSE)')
+    mape = models.FloatField(null=True, blank=True, verbose_name='平均绝对百分比误差(MAPE)')
+
+    error_message = models.TextField(null=True, blank=True, verbose_name='错误信息')
+
+    class Meta:
+        db_table = 'forecast_tasks_information'
+        verbose_name = '预测任务信息'
+        verbose_name_plural = '预测任务信息'
+        ordering = ['-start_time']
+
+    def __str__(self):
+        return f"{self.station.station_name}-{self.get_forecast_type_display()}"
